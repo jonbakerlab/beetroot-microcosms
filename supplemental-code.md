@@ -1,5 +1,6 @@
 # daniela-AHS-beetroot-project Supplemental Code
-From the nanopore sequencing, we were able to generate separate feature tables (OTU tables) for each flow cell run. To merge the feature tables together, the `feature-table merge` function in the qiime2 conda environment was used.
+# Preliminary Steps
+From the nanopore sequencing, separate feature tables (OTU tables) for each flow cell run were generated. To merge the feature tables together, the `feature-table merge` function in the qiime2 conda environment was used.
 
 ## Convert .txt files to .qza files
 Before merging the feature tables, first they must be converted the .txt tables into compatible .qza files:
@@ -7,7 +8,7 @@ Before merging the feature tables, first they must be converted the .txt tables 
 ```sh
 #!/bin/bash
 # first convert featureTable into a .biom format:
-conda activate qiime2-metagenome-2024.5
+conda activate qiime2-amplicon-2024.5
 biom convert -i featureTable.txt -o featureTable.biom --to-hdf5
 
 # import the featureTable into qiime to get a .qza file:
@@ -28,16 +29,29 @@ qiime feature-table merge \
     --p-overlap-method sum \
     --o-merged-table merged-featureTable.qza
 ```
-## qiime2 Emperor Plots and Rarefaction Curve
-Now that all of the featureTables have been combined into `merged-featureTable.qza`, the following code uses the `diversity core-metrics` function in qiime2's environment to generate a variety of diversity metric artifacts and visuals used in downstream analyses:
+
+## Alpha rarefaction curve
+Now that all of the featureTables have been combined into `merged-featureTable.qza`, the following code generates an alpha rarefaction curve visual with the qiime2 environment's `diversity alpha-rarefaction` command. This is helpful to visualize and ensure the all the taxa present has been observed in each sample.
+
+```sh
+#!/bin/bash
+qiime diversity alpha-rarefaction \
+    --i-table merged-featureTable.qza \
+    --p-max-depth 60000 \
+    --p-steps 40 \
+    --m-metadata-file metadata.txt \
+    --o-visualization alpha-rarefaction.qzv
+```
+## Core metrics generation
+In addition, the following code uses the `diversity core-metrics` function in qiime2's environment to generate a variety of diversity metric artifacts, a starting point for downstream analysis. Of particular importance is the `rarefied_table.qza` artifact. This is a normalized version of the `merged-featureTable.qza` file dictated by the parameter `--p-sampling-depth`. This rarefies the abundances present in each sample to the number inputted (in this case 4400 reads) so samples with a higher number of reads don't skew the data away from those with a lower number of reads.
 
 **NOTE: `gemelli` is a plugin downloaded and used in downstream analyses (RCPA and CTF) however, downloading the gemelli plugin downgrades the scikit-bio package to v0.5.9 from the base qiime scikit-bio v0.6.0. This downgraded version of scikit-bio is incompatible with the `diversity core-metrics` command specifically.**
 
 ```sh
 #!/bin/bash
 qiime diversity core-metrics \
-    --i-table ./feature_tables/merged-featureTable.qza \
-    --p-sampling-depth 4500 \
+    --i-table ./feature-tables/merged-featureTable.qza \
+    --p-sampling-depth 4400 \
     --m-metadata-file metadata.txt \
     --output-dir core-metrics-results
 ```
@@ -55,82 +69,6 @@ qiime diversity core-metrics \
 As well as the following visual files:
 * `core-metrics-results/jaccard_emperor.qzv`
 * `core-metrics-results/bray_curtis_emperor.qzv`
-
-The following code generates an alpha rarefaction curve visual with the qiime2 environment's `diversity alpha-rarefaction` command. This is helpful to visualize and ensure the all the taxa present has been observed in each sample.
-
-```sh
-#!/bin/bash
-qiime diversity alpha-rarefaction \
-    --i-table merged-featureTable.qza \
-    --p-max-depth 60000 \
-    --p-steps 40 \
-    --m-metadata-file metadata.txt \
-    --o-visualization alpha-rarefaction.qzv
-```
-
-# Beta Diversity Analysis
-## Bray Curtis emperor plot qnd permanova
-Using the `bray_curtis_distance_matrix.qza` artifact previously exported from the `diversity core-metrics` function, a permanova analysis can be conducted. Alternatively, the following sequence of codes can be run independent of `diversity core-metrics` to obtain the necessary artifacts for an emperor plot and permanova visualization:
-
-```sh
-#!/bin/bash
-# generate a braycurtis distance matrix
-qiime diversity beta \
- --i-table merged-featureTable.qza \
- --p-metric braycurtis \
- --o-distance-matrix ./core-metrics-results/bray_curtis_distance_matrix.qza
-
-# generate a braycurtis pcoa
-qiime diversity pcoa \
- --i-distance-matrix ./core-metrics-results/bray_curtis_distance_matrix.qza \
- --o-pcoa ./core-metrics-results/bray_curtis_pcoa.qza
-
-# generate the emperor plot
-qiime emperor plot \
-  --i-pcoa ./core-metrics-results/bray_curtis_pcoa.qza \
-  --m-metadata-file metadata.txt \
-  --o-visualization ./beta_diversity/bray_curtis_emperor.qzv
-
-# generate beta diversity permanova
-qiime diversity beta-group-significance \
-    --i-distance-matrix ./core-metrics-results//bray_curtis_distance_matrix.qza \
-    --m-metadata-file metadata.txt \
-    --m-metadata-column group \
-    --p-pairwise \
-    --p-method permanova \
-    --o-visualization ./beta_diversity/bray_curtis_permanova.qzv
-```
-
-##  Jaccard emperor plot and permanova
-An identical process was done for the Jaccard metric by substituting the `jaccard` argument for `--p-metric` in the `diversity beta` function:
-```sh
-#!/bin/bash
-# distance matrix:
-qiime diversity beta \
- --i-table merged-featureTable.qza \
- --p-metric jaccard \
- --o-distance-matrix ./core-metrics-results/jaccard_distance_matrix.qza
-
-# pcoa:
-qiime diversity pcoa \
- --i-distance-matrix ./core-metrics-results/jaccard_distance_matrix.qza \
- --o-pcoa ./core-metrics-results/jaccard_pcoa.qza
-
-# emperor plot:
-qiime emperor plot \
-  --i-pcoa ./core-metrics-results/jaccard_pcoa.qza \
-  --m-metadata-file metadata.txt \
-  --o-visualization ./beta_diversity/jaccard_emperor.qzv
-
-# permanova:
-qiime diversity beta-group-significance \
-    --i-distance-matrix ./core-metrics-results/jaccard_distance_matrix.qza \
-    --m-metadata-file metadata.txt \
-    --m-metadata-column group \
-    --p-pairwise \
-    --p-method permanova \
-    --o-visualization ./beta_diversity/jaccard_permanova.qzv
-```
 
 ## Phylogenetic Tree Generation
 A phylogenetic tree artifact is required to for the Weighted and Unweighted Unifrac metrics, therefore, before starting, a properly formatted `.fasta` file must be extracted from the 16S nanopore sequencing data:
@@ -157,9 +95,7 @@ Now you can simplify the FASTA deflines:
 sed -E 's/^>([^ ]+) ([^ ]+) ([^ ]+).*/>\2_\3/' output.fasta > output-simple.fasta
 ```
 ### Import to QIIME and generate your trees
-Now we can import the FASTA file we created into QIIME2.  Keep in mind you'll need to add underscores to your feature names in your feature table to match the Genus_species format we just created to make the tree (QIIME2 won't let us import the fasta file with spaces in the deflines):
-
-With the properly formatted .fasta file, it can now be imported it into qiime:
+With the properly formatted .fasta file, it can now be imported into qiime:
 
 ```sh
 #!/bin/bash
@@ -177,8 +113,6 @@ qiime phylogeny align-to-tree-mafft-fasttree \
   --o-tree unrooted-tree.qza \
   --o-rooted-tree rooted-tree.qza
 ```
-
-## Weighted and Unweighted Unifrac emperor plots and permanova
 ### Filtering the featureTable and rooted phylogenetic tree
 Through some trouble shooting, it was found that there were feature IDs in the feature tables that did not have a corresponding leaf in the rooted tree file. Fortunately, these missing species were relatively low in abundance. These species were filtered out based on a frequency count of reads less than 200. This was done using the `feature-table filter-feature` function: 
 
@@ -186,9 +120,9 @@ Through some trouble shooting, it was found that there were feature IDs in the f
 #!/bin/bash
 # filter out features with < 200 reads:
 qiime feature-table filter-features \
-    --i-table ./feature-tables/merged-featureTables.qza \
+    --i-table ./feature-tables/rarefied_table.qza \
     --p-min-frequency 200 \
-    --o-filtered-table ./feature-tables/filtered-featureTable.qza
+    --o-filtered-table ./feature-tables/filtered-rarefied-featureTable.qza
 ```
 
 With the new `filtered-featureTable.qza` file, the `rooted-tree.qza` was also filtered with `phylogeny filter-tree` based on the remaining species present in the feature table:
@@ -198,19 +132,111 @@ With the new `filtered-featureTable.qza` file, the `rooted-tree.qza` was also fi
 # filter tree based on remaining features:
 qiime phylogeny filter-tree \
   --i-tree ./16s-phylogeny/rooted-tree.qza \
-  --i-table ./feature_tables/filtered-featureTable.qza \
-  --o-filtered-tree ./16s-phylogeny/filtered-tree.qza
+  --i-table ./feature_tables/filtered-rarefied-featureTable.qza \
+  --o-filtered-tree ./16s-phylogeny/filtered-rarefied-tree.qza
 ```
 
+# Alpha Diversity Analysis
+## Vectors of alpha diversity
+Before performing the alpha diversity analyses, vector files for all the methods of alpha diversity analysis must be created. The shannon, chao1, and simpson metrics are all of interest, however, the vector for the shannon metric was created and exported using the `core-metrics` function. To create vectors for chao1 and simpson, the `diversity alpha` function was used:
+
+```sh
+#!/bin/bash
+# simpson metric:
+qiime diversity alpha \
+    --i-table ./feature-tables/rarefied_table.qza \
+    --p-metric simpson \
+    --o-alpha-diversity ./core-metrics-results/simpson_vector.qza
+
+# chao1 metric
+qiime diversity alpha \
+    --i-table ./feature-tables/rarefied_table.qza \
+    --p-metric chao1 \
+    --o-alpha-diversity ./core-metrics-results/chao1_vector.qza 
+```
+### Vectors with phylogenetic trees
+For vectors associated with a phylogenetic tree, its a similar process using the qiime `diversity alpha-phylogeny` function:
+
+```sh
+#!/bin/bash
+# faith_pd metric:
+qiime diversity alpha-phylogenetic \
+    --i-table ./feature-tables/filtered-rarefied-featureTable.qza \
+    --i-phylogeny ./16s-phylogeny/filtered-rarefied-tree.qza \
+    --p-metric faith_pd \
+    --o-alpha-diversity ./core-metrics-results/faith_pd_vector.qza
+```
+
+## Alpha diversity group significance
+With the alpha diversity vector artifacts, a group significance analysis using the `diversity alpha-group-significance` function can be run for each of the metrics, resepectively:
+
+```sh
+#!/bin/bash
+# shannon metric:
+qiime diversity alpha-group-significance \
+    --i-alpha-diversity ./core-metrics-results/shannon_vector.qza \
+    --m-metadata-file metadata.txt \
+    --o-visualization ./alpha-diversity/shannon-group-significance.qzv
+
+# simpson metric:
+qiime diversity alpha-group-significance \
+    --i-alpha-diversity ./core-metrics-results/simpson_vector.qza \
+    --m-metadata-file metadata.txt \
+    --o-visualization ./alpha-diversity/simpson-group-significance.qzv
+
+# chao1 metric:
+qiime diversity alpha-group-significance \
+    --i-alpha-diversity ./core-metrics-results/chao1_vector.qza \
+    --m-metadata-file metadata.txt \
+    --o-visualization ./alpha-diversity/chao1-group-significance.qzv
+
+# faith_pd metric:
+qiime diversity alpha-group-significance \
+    --i-alpha-diversity ./core-metrics-results/faith_pd_vector.qza \
+    --m-metadata-file metadata.txt \
+    --o-visualization ./alpha-diversity/faith-group-significance.qzv
+```
+
+# Beta Diversity Analysis
+## Bray Curtis emperor plot qnd permanova
+Using the `bray_curtis_distance_matrix.qza` artifact previously exported from the `diversity core-metrics` function, a permanova analysis can be conducted:
+
+```sh
+#!/bin/bash
+# generate beta diversity permanova
+qiime diversity beta-group-significance \
+    --i-distance-matrix ./core-metrics-results//bray_curtis_distance_matrix.qza \
+    --m-metadata-file metadata.txt \
+    --m-metadata-column group \
+    --p-pairwise \
+    --p-method permanova \
+    --o-visualization ./beta_diversity/bray_curtis_permanova.qzv
+```
+
+##  Jaccard emperor plot and permanova
+An identical process was done for the Jaccard metric by substituting the `jaccard` argument for `--p-metric` in the `diversity beta-group-significance` function:
+```sh
+#!/bin/bash
+# permanova:
+qiime diversity beta-group-significance \
+    --i-distance-matrix ./core-metrics-results/jaccard_distance_matrix.qza \
+    --m-metadata-file metadata.txt \
+    --m-metadata-column group \
+    --p-pairwise \
+    --p-method permanova \
+    --o-visualization ./beta_diversity/jaccard_permanova.qzv
+```
+
+## Weighted and Unweighted Unifrac emperor plots and permanova
 ### Weighted Unifrac emperor plot and permanova
-Now that the `filtered-featureTable.qza` and `filtered-tree.qza` have the same corresponding feature ID's, a similar sequence of codes as the Bray Curtis and Jaccard beta diversity analyses can be used for the weighted unifrac analysis using `diversity beta-phylogenetic`:
+Since the `filtered-rarefied-featureTable.qza` and `filtered-rarefied-tree.qza` have the same corresponding feature ID's, a similar sequence of codes as the Bray Curtis and Jaccard beta diversity analyses can be used for the weighted unifrac analysis using `diversity beta-phylogenetic`:
 
 ```sh
 #!/bin/bash
 # distance matrix:
 qiime diversity beta-phylogenetic \
-    --i-table ./feature_tables/filtered-featureTable.qza \
-    --i-phylogeny ./16s-phylogeny/filtered-tree.qza \
+    --i-table ./feature-tables/filtered-rarefied-featureTable.qza \
+    --i-phylogeny ./16s-phylogeny/filtered-rarefied-tree.qza \
     --p-metric weighted_unifrac \
     --o-distance-matrix ./core-metrics-results/weighted_unifrac_distance_matrix.qza
 
@@ -221,7 +247,7 @@ qiime diversity beta-group-significance \
     --m-metadata-column group \
     --p-pairwise \
     --p-method permanova \
-    --o-visualization  ./beta_diversity/weighted_unifrac_permanova.qzv
+    --o-visualization  ./beta-diversity/weighted_unifrac_permanova.qzv
 
 # pcoa:
 qiime diversity pcoa \
@@ -232,7 +258,7 @@ qiime diversity pcoa \
 qiime emperor plot \
     --i-pcoa ./core-metrics-results/weighted_unifrac_pcoa.qza \
     --m-metadata-file metadata.txt \
-    --o-visualization ./beta_diversity/weighted_unifrac_emperor.qzv
+    --o-visualization ./beta-diversity/weighted_unifrac_emperor.qzv
 ```
 ### Unweighted Unifrac emperor plot and permanova
 And similarly for the Unweighted Unifrac analysis by using the `--p-metric unweighted_unifrac` argument:
@@ -241,8 +267,8 @@ And similarly for the Unweighted Unifrac analysis by using the `--p-metric unwei
 #!/bin/bash
 # distance matrix:
 qiime diversity beta-phylogenetic \
-    --i-table ./feature_tables/filtered-featureTable.qza \
-    --i-phylogeny ./16s-phylogeny/filtered-tree.qza \
+    --i-table ./feature-tables/filtered-rarefied-featureTable.qza \
+    --i-phylogeny ./16s-phylogeny/filtered-rarefied-tree.qza \
     --p-metric unweighted_unifrac \
     --o-distance-matrix ./core-metrics-results/unweighted_unifrac_distance_matrix.qza
 
@@ -253,7 +279,7 @@ qiime diversity beta-group-significance \
     --m-metadata-column group \
     --p-pairwise \
     --p-method permanova \
-    --o-visualization  ./beta_diversity/unweighted_unifrac_permanova.qzv
+    --o-visualization  ./beta-diversity/unweighted_unifrac_permanova.qzv
 
 # pcoa:
 qiime diversity pcoa \
@@ -264,83 +290,20 @@ qiime diversity pcoa \
 qiime emperor plot \
     --i-pcoa ./core-metrics-results/unweighted_unifrac_pcoa.qza \
     --m-metadata-file metadata.txt \
-    --o-visualization ./beta_diversity/unweighted_unifrac_emperor.qzv
-```
-Finally, it is worth noting that the function `diversity core-metrics-phylogenetic` is would provide the results from `diversity core-metrics` in addition to the Weighted and Unweighted Unifrac artifacts. However, due to the order in which these were conducted, the phylogenetic analyses were done independently.
-
-# Alpha Diversity Analysis
-## Vectors of alpha diversity
-Before performing the alpha diversity permanova, vector files for all the methods of alpha diversity analysis must be created. The shannon, chao1, and simpson metrics are all of interest, however, the vector for the shannon metric was created and exported using the `core-metrics` function. To create vectors for chao1 and simpson, `diversity alpha` function was used:
-
-```sh
-#!/bin/bash
-# simpson metric:
-qiime diversity alpha \
-    --i-table ./feature_tables/merged-featureTable.qza \
-    --p-metric simpson \
-    --o-alpha-diversity ./core-metrics-results/simpson_vector.qza
-
-# chao1 metric
-qiime diversity alpha \
-    --i-table ./feature_tables/merged-featureTable.qza \
-    --p-metric chao1 \
-    --o-alpha-diversity ./core-metrics-results/chao1_vector.qza 
-
-# shannon metric:
-qiime diversity alpha \
-    --i-table ./feature_tables/merged-featureTable.qza \
-    --p-metric shannon \
-    --o-alpha-diversity ./core-metrics-results/shannon_vector.qza
-```
-### Vectors with phylogenetic trees
-For vectors associated with a phylogenetic tree, its a similar process using the qiime `diversity alpha-phylogeny` function:
-
-```sh
-#!/bin/bash
-# faith_pd metric:
-qiime diversity alpha-phylogenetic \
-    --i-table ./feature_tables/filtered-featureTable.qza \
-    --i-phylogeny ./16s-phylogeny/filtered-tree.qza \
-    --p-metric faith_pd \
-    --o-alpha-diversity ./core-metrics-results/faith_pd_vector.qza
-```
-## Alpha diversity group significance
-With the alpha diversity vector artifacts, a group significance analysis using the `diversity alpha-group-significance` function can be run for each of the metrics, resepectively:
-
-```sh
-#!/bin/bash
-# shannon metric:
-qiime diversity alpha-group-significance \
-    --i-alpha-diversity ./alpha_diversity/shannon_vector.qza \
-    --m-metadata-file metadata.txt \
-    --o-visualization ./alpha_diversity/shannon-group-significance.qzv
-
-# simpson metric:
-qiime diversity alpha-group-significance \
-    --i-alpha-diversity ./alpha_diversity/simpson_vector.qza \
-    --m-metadata-file metadata.txt \
-    --o-visualization ./alpha_diversity/simpson-group-significance.qzv
-
-# chao1 metric:
-qiime diversity alpha-group-significance \
-    --i-alpha-diversity ./alpha_diversity/chao1_vector.qza \
-    --m-metadata-file metadata.txt \
-    --o-visualization ./alpha_diversity/chao1-group-significance.qzv
-
-# faith_pd metric:
-qiime diversity alpha-group-significance \
-    --i-alpha-diversity ./core-metrics-results/faith_pd_vector.qza \
-    --m-metadata-file metadata.txt \
-    --o-visualization ./alpha_diversity/faith-group-significance.qzv
+    --o-visualization ./beta-diversity/unweighted_unifrac_emperor.qzv
 ```
 
-# Gemelli Plugin Analysis
+Finally, it is worth noting that the function `diversity core-metrics-phylogenetic` is would provide the results from `diversity core-metrics` in addition to the Weighted and Unweighted Unifrac artifacts. However, due to the order in which these were conducted (creating the rarefied feature table) the phylogenetic analyses were done independently.
+
+# Gemelli Plugin Analyses
 The `gemelli` plugin provides other methods for visualizing significant differences among groups: Robust Aitchison PCA (RPCA) and Compositional Tensor Factorization (CTF).
 
 ## Robust Aitchison PCA (RPCA)
-**Insert something about RPCA**
 
-... For this section of analysis, a separate qiime enivronment was created specifically for the gemelli plugin due to the aforementioned version differences:
+RPCA is another metric for investigating beta diversity which is done through use of the `gemelli` plugin. A separate qiime enivronment was created specifically for the `gemelli` due to the aforementioned version differences. 
+
+**Note: For both the RPCA and phylogenetic RPCA (as well as the CTF analyses below) use an in-house normalization method for a feature table. Therefore, in the following sections, the overall `merged-featureTable.qza` was used.**
+
 ```sh
 #!/bin/bash
 conda activate qiime2-gemelli_env
@@ -358,10 +321,12 @@ qiime gemelli rpca \
     --o-distance-matrix ./core-metrics-results/rcpa_distance.qza
 ```
 The exported files-
+
 * `ordination.qza`
 * `rcpa_distance.qza`
 
 -provide the pcoa and distance matrix artifacts, respectively, to use for the `emperor biplot` and `diversity beta-grou-significance` functions in the base qiime environment:
+
 ```sh
 # generate rpca emperor biplot:
 qiime emperor biplot \
@@ -402,14 +367,31 @@ qiime metadata tabulate \
 **NOTE: Since the filtered featureTable and filtered phylogenetic tree files are being used, the taxonomy must *only* contain the species present in both.**
 
 ### Phylogenetic RPCA analysis
-With the newly formatted taxonomy artifact, all the required files are created and can be inputted as arguments in the `gemelli phylogenetic-rcpa-with-taxonomy` function:
+Prior to starting this analysis, a new filtered phylogenetic tree must be created. This is because, since the `merged-featureTable.qza` is being inputted, a phylogenetic tree must be filtered based on this specific feature table rather than the `rarefied_table.qza`. Luckily, this process is the exact same: filter `merged-featureTable.qza` and filter `rooted-tree.qza`.
+
+```sh
+#!/bin/bash
+# filter out features with < 200 reads:
+qiime feature-table filter-features \
+    --i-table ./feature-tables/merged-featureTable.qza \
+    --p-min-frequency 200 \
+    --o-filtered-table ./feature-tables/filtered-merged-featureTable.qza
+
+# filter tree based on remaining features:
+qiime phylogeny filter-tree \
+  --i-tree ./16s-phylogeny/rooted-tree.qza \
+  --i-table ./feature_tables/filtered-merged-featureTable.qza \
+  --o-filtered-tree ./16s-phylogeny/filtered-merged-tree.qza
+```
+
+With the newly generated filtered artifacts and the previously formatted taxonomy artifact, all the required files are created and can be inputted as arguments in the `gemelli phylogenetic-rcpa-with-taxonomy` function:
 
 ```sh
 #!/bin/bash
 # create all the metrics needed for downstream analysis:
 qiime gemelli phylogenetic-rpca-with-taxonomy \
-    --i-table ./feature_tables/filtered-featureTable.qza \
-    --i-phylogeny ./16s-phylogeny/filtered-tree.qza \
+    --i-table ./feature-tables/filtered-merged-featureTable.qza \
+    --i-phylogeny ./16s-phylogeny/filtered-merged-tree.qza \
     --m-taxonomy-file ./16s-phylogeny/taxonomy/filtered-taxonomy.qza \
     --o-biplot ./core-metrics-results/phylo-ordination.qza \
     --o-distance-matrix ./core-metrics-results/phylo-distance.qza \
@@ -439,7 +421,7 @@ qiime empress community-plot \
     --o-visualization ./beta_diversity/phylo-empress.qzv
 ```
 
-The permanova can be created in the base qiime environment, as done previously with the RCPA, Jaccard, and Bray Curtis metrics:
+The permanova can be created in the base qiime environment, as done previously with the RCPA:
 
 ```sh
 #!/bin/bash
@@ -454,9 +436,8 @@ qiime diversity beta-group-significance \
 ```
 
 ## Compositional Tensor Factorization (CTF)
-**Insert something about CTF**
+As mentioned in the main document, CTF helps aleviate some of the subject-to-subject oral microbiome variability by comparing repeated measures of the same subject. Much like the RCPA analysis, the CTF analysis must be done in the `gemelli` environment.  In addition, like RCPA, the CTF workflow uses its own in-house normalizion methods, therefore, the feature table before rarefaction (`merged-featureTable.qza`) was used. This applies to both the CTF and phylogenetic CTF analyses.
 
-...Much like the RCPA analysis, the CTF analysis must be done in the `gemelli` environment.  Using the `gemelli ctf` function... **something about what the subject and state columns are**
 ```sh
 #!/bin/bash
 qiime gemelli ctf \
@@ -466,6 +447,7 @@ qiime gemelli ctf \
     --p-state-column state \
     --output-dir ctf-results
 ```
+
 The output directory contains the following files:
 * `subject_biplot.qza`
 * `state_biplot.qza`
@@ -474,6 +456,7 @@ The output directory contains the following files:
 * `state_feature_ordination.qza`
 
 Using some of these output files, an emperor biplot can be generated using `emperor biplot` in the base qiime environment:
+
 ```sh
 #!/bin/bash
 qiime emperor biplot \
@@ -484,16 +467,17 @@ qiime emperor biplot \
 ```
 
 ## Phylogenetic CTF analysis
-Similarly to the phylogenetic RPCA analysis, the taxonomic metadata is required. This essentially combines the Phylogenetic RPCA section and the CTF analysis, i.e., uses the state and subject columns.
+Similarly to the phylogenetic RPCA analysis, the `filtered-taxonomy.qza` taxonomic metadata and `filtered-merged-tree.qza` phylogeny tree files are required.
+
 ```sh
 #!/bin/bash
 qiime gemelli phylogenetic-ctf-with-taxonomy \
-    --i-table ./feature_tables/filtered-featureTable.qza \
-    --i-phylogeny ./16s-phylogeny/filtered-tree.qza \
+    --i-table ./feature-tables/filtered-merged-featureTable.qza \
+    --i-phylogeny ./16s-phylogeny/filtered-merged-tree.qza \
     --m-sample-metadata-file metadata.txt \
     --m-taxonomy-file ./16s-phylogeny/taxonomy/filtered-taxonomy.qza \
-    --p-state-column 'group' \
-    --p-individual-id-column sample \
+    --p-state-column state \
+    --p-individual-id-column subject \
     --output-dir ./phylo-ctf-results
 ```
 The output directory contains the following files:
@@ -508,6 +492,7 @@ The output directory contains the following files:
 * `subject_table.qza`
 
 With the files above, an empress plot can be generated using `empress community-plot` since the data contains phylogenetic and taxonomic data:
+
 ```sh
 # empress plot:
 qiime empress community-plot \
@@ -519,9 +504,219 @@ qiime empress community-plot \
     --p-filter-missing-features \
     --o-visualization ./phylo-ctf-results/phylo-subject-empress.qzv
 ```
+# Subject Analysis
+In addition to the alpha and beta diversity analysis on the different conditions, i.e. smoker/nonsmoker and saliva/growth, alpha and beta diversity analyses were conducted based on subjects response to the initial survey to tease out any correlations between subject metadata and oral microbiome. These include gender, age, coffee consumption, sugar consumption, alcohol consumption, and pH. All except gender were recorded in the metadata on a numerical scale, therefore, a different functions in qiime2 were used to test for alpha and beta diversity significance.
+
+For these analyses, only the saliva samples were considered. This is due to the fact that those were the original samples provided by the subjects and no selectivity had occured during a growth process, as is the case for the microcosms. Hence, using the rarefied feature table as a basis, `saliva-featureTable.qza` and `subject-metadata.qza` were used as new feature tables and metadata tables, respectively, to exclude all microcosm data.
+
+## Numerical alpha diversity
+Much like with categorical metadata (done previously), an evenness vector can be generated using `qiime diversity alpha` for the Shannon, Simpson, and Chao1 metrics:
+
+```sh
+#!/bin/bash
+qiime diversity alpha \
+    --i-table ./feature-tables/saliva-featureTable.qza \
+    --p-metric simpson \
+    --o-alpha-diversity ./subject-analysis/metrics/simpson-saliva-vector.qza
+
+qiime diversity alpha \
+    --i-table ./feature-tables/saliva-featureTable.qza \
+    --p-metric shannon \
+    --o-alpha-diversity ./subject-analysis/metrics/shannon-saliva-vector.qza
+
+qiime diversity alpha \
+    --i-table ./feature-tables/saliva-featureTable.qza \
+    --p-metric chao1 \
+    --o-alpha-diversity ./subject-analysis/metrics/chao1-saliva-vector.qza
+ ```
+
+With the vector artifacts, rather than using `qiime diversity alpha-group-significance` for categorical metadata, numerical metadata used the `qiime alpha-correlation` function. Again, this was done below for each metric: Shannon, Simpson, Chao1.
+
+```sh
+#!/bin/bash
+# simpson metric:
+qiime diversity alpha-correlation \
+    --i-alpha-diversity ./subject-analysis/metrics/simpson-saliva-vector.qza \
+    --m-metadata-file  subject-metadata.txt \
+    --o-visualization ./subject-analysis/alpha-diversity/simpson-numeric-group-significance.qzv
+
+# shannon metric:
+qiime diversity alpha-correlation \
+    --i-alpha-diversity ./subject-analysis/metrics/shannon-saliva-vector.qza \
+    --m-metadata-file  subject-metadata.txt \
+    --o-visualization ./subject-analysis/alpha-diversity/shannon-numeric-group-significance.qzv
+
+# chao1 metric:
+qiime diversity alpha-correlation \
+    --i-alpha-diversity ./subject-analysis/metrics/chao1-saliva-vector.qza \
+    --m-metadata-file  subject-metadata.txt \
+    --o-visualization ./subject-analysis/alpha-diversity/chao1-numeric-group-significance.qzv
+```
+The output files `-numeric-group-significance.qzv` is a visual artifact that also provides statistical significance information.
+
+## Numerical beta diversity
+Similarly to categorical metadata, a distance matrix artifact must be generated using `qiime diversity pcoa` for numerical data. As previously done, the distance matrix for each metric: Bray Curtis and Jaccard.
+
+```sh
+#!/bin/bash
+# for Bray Curtis
+qiime diversity beta \
+    --i-table ./feature-tables/saliva-featureTable.qza \
+    --p-metric braycurtis \
+    --o-distance-matrix ./subject-analysis/metrics/bc-saliva-distance-matrix.qza
+
+# for Jaccard
+qiime diversity beta \
+    --i-table ./feature-tables/saliva-featureTable.qza \
+    --p-metric jaccard \
+    --o-distance-matrix ./subject-analysis/metrics/jaccard-saliva-distance-matrix.qza
+```
+
+With the distance matrix artifacts, instead of using `qiime diversity beta-group-significance` for categorical metadata, numerical metadata significance is shown through a mantel plot generated via `qiime diversity beta-correlation`. This function is applied to both Bray Curtis and Jaccard as well as to each of the metadata groups listed above.
+
+```sh
+#!/bin/bash
+# for Bray Curtis
+# mantle plot for numerical 'pH' metadata
+qiime diversity beta-correlation \
+    --i-distance-matrix ./subject-analysis/metrics/bc-saliva-distance-matrix.qza \
+    --m-metadata-file subject-metadata.txt \
+    --m-metadata-column pH \
+    --o-metadata-distance-matrix ./subject-analysis/metrics/bc-pH-distance-matrix.qza \
+    --o-mantel-scatter-visualization ./subject-analysis/beta-diversity/bc-pH-mantel.qzv
+
+# mantel plot for numerical 'age' metadata 
+qiime diversity beta-correlation \
+    --i-distance-matrix ./subject-analysis/metrics/bc-saliva-distance-matrix.qza \
+    --m-metadata-file subject-metadata.txt \
+    --m-metadata-column age \
+    --o-metadata-distance-matrix ./subject-analysis/metrics/bc-age-distance-matrix.qza \
+    --o-mantel-scatter-visualization ./subject-analysis/beta-diversity/bc-age-mantel.qzv
+
+# mantel plot for numerical 'sugar' metadata
+qiime diversity beta-correlation \
+    --i-distance-matrix ./subject-analysis/metrics/bc-saliva-distance-matrix.qza \
+    --m-metadata-file subject-metadata.txt \
+    --m-metadata-column sugar \
+    --o-metadata-distance-matrix ./subject-analysis/metrics/bc-sugar-distance-matrix.qza \
+    --o-mantel-scatter-visualization ./subject-analysis/beta-diversity/bc-sugar-mantel.qzv
+
+# mantel plot for numerical 'coffee' metadata
+qiime diversity beta-correlation \
+    --i-distance-matrix ./subject-analysis/metrics/bc-saliva-distance-matrix.qza \
+    --m-metadata-file subject-metadata.txt \
+    --m-metadata-column coffee \
+    --o-metadata-distance-matrix ./subject-analysis/metrics/bc-coffee-distance-matrix.qza \
+    --o-mantel-scatter-visualization ./subject-analysis/beta-diversity/bc-coffee-mantel.qzv
+
+# mantel plot for numerical 'alcohol' metadata
+qiime diversity beta-correlation \
+    --i-distance-matrix ./subject-analysis/metrics/bc-saliva-distance-matrix.qza \
+    --m-metadata-file subject-metadata.txt \
+    --m-metadata-column alcohol \
+    --o-metadata-distance-matrix ./subject-analysis/metrics/bc-alcohol-distance-matrix.qza \
+    --o-mantel-scatter-visualization ./subject-analysis/beta-diversity/bc-alcohol-mantel.qzv
+
+# for Jaccard
+# mantle plot for numerical 'pH' metadata
+qiime diversity beta-correlation \
+    --i-distance-matrix ./subject-analysis/metrics/jaccard-saliva-distance-matrix.qza \
+    --m-metadata-file subject-metadata.txt \
+    --m-metadata-column pH \
+    --o-metadata-distance-matrix ./subject-analysis/metrics/jaccard-pH-distance-matrix.qza \
+    --o-mantel-scatter-visualization ./subject-analysis/beta-diversity/jaccard-pH-mantel.qzv
+
+# mantel plot for numerical 'age' metadata 
+qiime diversity beta-correlation \
+    --i-distance-matrix ./subject-analysis/metrics/jaccard-saliva-distance-matrix.qza \
+    --m-metadata-file subject-metadata.txt \
+    --m-metadata-column age \
+    --o-metadata-distance-matrix ./subject-analysis/metrics/jaccard-age-distance-matrix.qza \
+    --o-mantel-scatter-visualization ./subject-analysis/beta-diversity/jaccard-age-mantel.qzv
+
+# mantel plot for numerical 'sugar' metadata
+qiime diversity beta-correlation \
+    --i-distance-matrix ./subject-analysis/metrics/jaccard-saliva-distance-matrix.qza \
+    --m-metadata-file subject-metadata.txt \
+    --m-metadata-column sugar \
+    --o-metadata-distance-matrix ./subject-analysis/metrics/jaccard-sugar-distance-matrix.qza \
+    --o-mantel-scatter-visualization ./subject-analysis/beta-diversity/jaccard-sugar-mantel.qzv
+
+# mantel plot for numerical 'coffee' metadata
+qiime diversity beta-correlation \
+    --i-distance-matrix ./subject-analysis/metrics/jaccard-saliva-distance-matrix.qza \
+    --m-metadata-file subject-metadata.txt \
+    --m-metadata-column coffee \
+    --o-metadata-distance-matrix ./subject-analysis/metrics/jaccard-coffee-distance-matrix.qza \
+    --o-mantel-scatter-visualization ./subject-analysis/beta-diversity/jaccard-coffee-mantel.qzv
+
+# mantel plot for numerical 'alcohol' metadata
+qiime diversity beta-correlation \
+    --i-distance-matrix ./subject-analysis/metrics/jaccard-saliva-distance-matrix.qza \
+    --m-metadata-file subject-metadata.txt \
+    --m-metadata-column alcohol \
+    --o-metadata-distance-matrix ./subject-analysis/metrics/jaccard-alcohol-distance-matrix.qza \
+    --o-mantel-scatter-visualization ./subject-analysis/beta-diversity/jaccard-alcohol-mantel.qzv
+```
+Here, the `-mantel.qzv` output file provides the mantel plot as well as statistical significance information.
+
+## Gender alpha and beta diversity
+Due to the categorical nature of gender (male/female), the original method of alpha and beta diversity analyses can be employed. 
+
+For alpha diversity:
+```sh 
+#!/bin/bash
+# for shannon metric...
+qiime diversity alpha-group-significance \
+    --i-alpha-diversity ./subject-analysis/metrics/shannon-saliva-vector.qza \
+    --m-metadata-file subject-metadata.txt \
+    --o-visualization ./subject-analysis/alpha-diversity/shannon-categorical-group-significance.qzv
+
+# for simpson metric...
+qiime diversity alpha-group-significance \
+    --i-alpha-diversity ./subject-analysis/metrics/simpson-saliva-vector.qza \
+    --m-metadata-file subject-metadata.txt \
+    --o-visualization ./subject-analysis/alpha-diversity/simpson-categorical-group-significance.qzv
+
+# for chao1 metric...
+qiime diversity alpha-group-significance \
+    --i-alpha-diversity ./subject-analysis/metrics/chao1-saliva-vector.qza \
+    --m-metadata-file subject-metadata.txt \
+    --o-visualization ./subject-analysis/alpha-diversity/chao1-categorical-group-significance.qzv
+
+```
+And for beta diversity:
+```sh
+#!/bin/bash
+# bray curtis permanova
+qiime diversity beta-group-significance \
+    --i-distance-matrix ./subject-analysis/metrics/bc-saliva-distance-matrix.qza \
+    --m-metadata-file subject-metadata.txt \
+    --m-metadata-column gender \
+    --p-pairwise \
+    --p-method permanova \
+    --o-visualization ./subject-analysis/beta-diversity/bc-gender-permanova.qzv
+
+# jaccard permanoava
+qiime diversity beta-group-significance \
+    --i-distance-matrix ./subject-analysis/metrics/jaccard-saliva-distance-matrix.qza \
+    --m-metadata-file subject-metadata.txt \
+    --m-metadata-column gender \
+    --p-pairwise \
+    --p-method permanova \
+    --o-visualization ./subject-analysis/beta-diversity/jaccard-gender-permanova.qzv
+```
 
 # Differential Abundance Analysis
-## ANCOMBC
+The differential abundance analysis was executed using two programs: ANCOM-BC which is integrated in the base package of qiime2, and songbird, in which the plugin version for the qiime2 environment, was used. Due to the inconsistent nature of various differential abundance analysis methods, using two methods and looking for corresponding results gives greater confidence in the outcome.
+
+**Note: Like the RPCA and CTF analyses, these differential abundance tests filter the feature tables in the process. Therefore, the `merged-featureTable.qza` artifact is used as the feature table input.**
+
+## ANCOM-BC
+By inputting the feature table and metadata files into the `qiime composition ancombc` function, a differential abundance artifact is generated. This can be used for downstream visualizations. It is important to note a few arguments in this function:
+
+* `--p-formula`: the categorical metadata column for the differential analysis. In this case it is `group` which divides the samples into their respective conditions: 'saliva-control', 'saliva-smoker', 'control-growth', 'control-beetroot', 'smoker-growth', and 'smoker-beetroot'.
+* `--p-reference-levels`: the level in which all other conditions in the specified formula above will be compared to. The default selects the reference level in alphabetical order. Here it is specified as `group::saliva-control` meaning the the 'saliva-control' group will be the reference.
 ```sh
 #!/bin/bash
 qiime composition ancombc \
@@ -531,24 +726,28 @@ qiime composition ancombc \
     --p-reference-levels group::saliva-control \
     --o-differentials ./differential_abundance/differential.qza
 ```
-### differential abundance bar plots
+### Differential abundance bar plot and table
+With the `differential.qza` outputted from the function above, this can now be inputted into `qiime composition da-barplot` and `qiime composition tabulate` to generate a barplot and table visual, respectively.
 ```sh
 #!/bin/bash
+# differential abundance barplot
 qiime composition da-barplot \
     --i-data ./differential_abundance/differential.qza \
     --o-visualization ./differential_abundance/da-barplot.qzv
-```
 
-### differential abundance table
-```sh
-#!/bin/bash
+# differential abundance table
 qiime composition tabulate \
     --i-data ./differential_abundance/differential.qza \
     --o-visualization ./differential_abundance/da-table.qzv
 ```
+This process was repeated using each group condition as the reference level.
 
 ## songbird
+Songbird can be used either as a standalone environment or, as previously mentioned, a plugin for the qiime2 enviornment. The latter was used for this analysis. The songbird plugin is only compatible with qiime2 v2019.7 through v2020.6 so qiime2 v2020.6 was used. 
 
+Songbird operates on a machine learning algorithm and hence input parameters were set and modified to iteratively improve the models fit until certain features were observable in the output model: an exponential decay followed by a plateau, the model line is "below" the null model baseline, and there is a positive Q^2 value. Because of the repetitiveness of this, the script below was created to expidite the process.
+
+Finally, it is important to note that songbird doesn't allow for selection of which conditions to compare. Therefore, to bypass this issue, and allow a one-to-one comparison with ANCOM-BC, separate feature tables and metadata files were created for each comparison desired. For example, to compare just the nonsmokers beetroot to smokers beetroot samples, a new feature table and metadata file was filtered to contain just the information for those two conditions.
 ```sh
 #!/bin/bash
 
@@ -641,3 +840,4 @@ for file in $dir_nullmodel/*; do
         --output-path $dir_nullmodel_export
 done
 ```
+This process was repeated for each combination of conditions to compare.
